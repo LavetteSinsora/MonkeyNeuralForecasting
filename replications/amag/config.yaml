@@ -1,5 +1,15 @@
 # AMAG Replication Configuration
 # Reference: NeurIPS 2023
+#
+# temporal_module: 'gru'         → AMAGReplica with GRU TE (default, backward-compatible)
+# temporal_module: 'transformer' → AMAGTransformer with Transformer TE + TR (multi-step paper variant)
+#
+# readout_mode (gru only):
+#   'direct'        → single-shot FC from final hidden state (original)
+#   'autoregressive' → AMAG-G autoregressive GRU decoder (paper Appendix A.2)
+#
+# adaptor_depth: 4 = paper's [128, 128, 256, 64] → 1 (4-layer MLP)
+#                2 = original 2-layer [128, 64] → 1
 
 experiment:
   name: amag_replication
@@ -17,9 +27,12 @@ data:
   batch_size: 32
 
 model:
+  temporal_module: gru          # 'gru' or 'transformer'
+  readout_mode: direct          # 'direct' or 'autoregressive' (gru only)
   hidden_size: 64
   use_adaptor: true
   compute_init_corr: true
+  adaptor_depth: 4              # 4 = paper spec (4-layer MLP), 2 = original 2-layer
 
 training:
   lr: 5.0e-4
@@ -31,6 +44,9 @@ training:
   seed: 42
   log_every: 10
   device: auto
+  # Teacher forcing for autoregressive readout (ignored when readout_mode='direct')
+  teacher_forcing_start: 0.5    # initial teacher forcing ratio
+  teacher_forcing_decay: 0.005  # decay per epoch (reaches ~0 at epoch ~100)
 
 ablations:
   - name: full_amag
