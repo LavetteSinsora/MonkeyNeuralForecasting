@@ -183,7 +183,8 @@ class TransformerTemporalEncoder(nn.Module):
             batch_first=True,
             norm_first=True,   # pre-norm (more stable training)
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers,
+                                                  enable_nested_tensor=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C, F = x.shape
@@ -224,7 +225,8 @@ class TransformerTemporalReadout(nn.Module):
             batch_first=True,
             norm_first=True,
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers,
+                                                  enable_nested_tensor=False)
         self.fc_out = nn.Linear(hidden_size, 1)
 
     def forward(self, Z: torch.Tensor) -> torch.Tensor:
