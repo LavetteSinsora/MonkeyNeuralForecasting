@@ -1,0 +1,99 @@
+# Study 002: Faithful AMAG Replication — Experiment Configurations
+#
+# Three variants to train and compare:
+#   gru_ar:           AMAG-G with autoregressive GRU decoder (10-ctx)
+#   transformer_5ctx: AMAG-T with Transformer TE+TR, 5 context steps (paper exact)
+#   transformer_10ctx: AMAG-T with Transformer TE+TR, 10 context steps (competition)
+
+experiment:
+  name: study_002_faithful_replication
+  paper_mse_affi: 0.0144
+  paper_mse_beignet: 0.0192
+  paper_r2_affi: 0.763
+  paper_r2_beignet: 0.665
+
+# ─── Variant: AMAG-G Autoregressive ──────────────────────────────────────────
+gru_ar:
+  data:
+    context_steps: 10
+    pred_steps: 10
+    val_fraction: 0.15
+    seed: 42
+    batch_size: 32
+  model:
+    temporal_module: gru
+    readout_mode: autoregressive
+    hidden_size: 64
+    use_adaptor: true
+    compute_init_corr: true
+    adaptor_depth: 4
+  training:
+    lr: 5.0e-4
+    weight_decay: 1.0e-5
+    n_epochs: 1000
+    lr_decay: 0.95
+    lr_decay_every: 50
+    patience: 150
+    seed: 42
+    log_every: 10
+    device: auto
+    teacher_forcing_start: 0.5
+    teacher_forcing_decay: 0.005
+
+# ─── Variant: AMAG-T, 5 context steps (paper exact) ──────────────────────────
+transformer_5ctx:
+  data:
+    context_steps: 5
+    pred_steps: 10
+    val_fraction: 0.15
+    seed: 42
+    batch_size: 32
+  model:
+    temporal_module: transformer
+    hidden_size: 64
+    use_adaptor: true
+    compute_init_corr: true
+    adaptor_depth: 4
+    n_context_steps: 5
+    n_heads: 4
+    n_layers: 2
+    dropout: 0.1
+  training:
+    lr: 5.0e-4
+    weight_decay: 1.0e-5
+    n_epochs: 1000
+    lr_decay: 0.95
+    lr_decay_every: 50
+    patience: 150
+    seed: 42
+    log_every: 10
+    device: auto
+
+# ─── Variant: AMAG-T, 10 context steps (competition setting) ─────────────────
+transformer_10ctx:
+  data:
+    context_steps: 10
+    pred_steps: 10
+    val_fraction: 0.15
+    seed: 42
+    batch_size: 32
+  model:
+    temporal_module: transformer
+    hidden_size: 64
+    use_adaptor: true
+    compute_init_corr: true
+    adaptor_depth: 4
+    n_context_steps: 10
+    n_heads: 4
+    n_layers: 2
+    dropout: 0.1
+  training:
+    lr: 5.0e-4
+    weight_decay: 1.0e-5
+    n_epochs: 1000
+    lr_decay: 0.95
+    lr_decay_every: 50
+    patience: 150
+    seed: 42
+    log_every: 10
+    device: auto

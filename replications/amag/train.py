@@ -2,10 +2,16 @@
 """
 AMAG Replication — Training Script
 
+Supports three model variants:
+  gru/direct:       AMAGReplica with single-shot GRU readout (original, backward-compatible)
+  gru/autoregressive: AMAGReplica with autoregressive GRU decoder (AMAG-G paper variant)
+  transformer:      AMAGTransformer with Transformer TE+TR (AMAG-T multi-step paper variant)
+
 Usage:
-    python replications/amag/train.py
-    python replications/amag/train.py --epochs 2        # smoke test
+    python replications/amag/train.py                            # both monkeys, GRU direct
+    python replications/amag/train.py --epochs 2                 # smoke test
     python replications/amag/train.py --monkey affi
+    python replications/amag/train.py --monkey affi --config path/to/config.yaml
 """
 
 import sys
@@ -25,7 +31,7 @@ _root = os.path.abspath(os.path.join(_here, '..', '..'))
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from utils.data import get_dataloaders
+from utils.data import get_dataloaders, get_dataloaders_fullseq
 from utils.metrics import evaluate_model, print_results, save_results
 from replications.amag.model import build_model
 
@@ -41,7 +47,12 @@ def set_seed(seed=42):
 
 
 class Trainer:
-    """Generic trainer with MSE loss, early stopping, checkpoint saving, LR scheduling."""
+    """Generic trainer with MSE loss, early stopping, checkpoint saving, LR scheduling.
+
+    Supports optional teacher forcing for AutoregressiveTemporalReadout:
+      - Activated when model.supports_teacher_forcing is True
+      - teacher_ratio decays from teacher_forcing_start to 0 over training
+    """
 
     def __init__(self, model, train_loader, val_loader, config):
         self.config = config
@@ -79,13 +90,31 @@ class Trainer:
         self.best_val_mse = float('inf')
         self.patience_counter = 0
 
-    def _train_epoch(self):
+        # Teacher forcing state (for autoregressive readout)
+        self._use_teacher_forcing = (
+            hasattr(self.model, 'supports_teacher_forcing')
+            and self.model.supports_teacher_forcing
+        )
+        self._tf_start = config.get('teacher_forcing_start', 0.5)
+        self._tf_decay = config.get('teacher_forcing_decay', 0.005)
+        self._current_tf_ratio = self._tf_start if self._use_teacher_forcing else 0.0
+
+    def _teacher_ratio_at_epoch(self, epoch: int) -> float:
+        """Compute teacher forcing ratio for a given epoch (decays to 0)."""
+        if not self._use_teacher_forcing:
+            return 0.0
+        return max(0.0, self._tf_start - self._tf_decay * (epoch - 1))
+
+    def _train_epoch(self, teacher_ratio: float = 0.0):
         self.model.train()
         total_loss, n = 0.0, 0
         for X, Y in self.train_loader:
             X, Y = X.to(self.device), Y.to(self.device)
             self.optimizer.zero_grad()
-            pred = self.model(X)
+            if teacher_ratio > 0.0 and self._use_teacher_forcing:
+                pred = self.model(X, teacher_target=Y, teacher_ratio=teacher_ratio)
+            else:
+                pred = self.model(X)
             loss = self.criterion(pred, Y)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -127,11 +156,14 @@ class Trainer:
 
         info = self.model.get_model_info() if hasattr(self.model, 'get_model_info') else {}
         if verbose:
-            print(f"Training {info.get('name', 'model')} | {info.get('n_params_M', '?')}M params | device={self.device}")
+            tf_note = f" | teacher_forcing={self._tf_start:.2f}→0" if self._use_teacher_forcing else ""
+            print(f"Training {info.get('name', 'model')} | {info.get('n_params_M', '?')}M params "
+                  f"| device={self.device}{tf_note}")
 
         for epoch in range(1, n_epochs + 1):
             t0 = time.time()
-            train_mse = self._train_epoch()
+            teacher_ratio = self._teacher_ratio_at_epoch(epoch)
+            train_mse = self._train_epoch(teacher_ratio=teacher_ratio)
             val_mse = self._val_epoch()
             self.scheduler.step()
 
@@ -147,14 +179,16 @@ class Trainer:
                 'epoch': epoch, 'train_mse': train_mse, 'val_mse': val_mse,
                 'best_val_mse': self.best_val_mse,
                 'lr': self.scheduler.get_last_lr()[0],
+                'teacher_ratio': round(teacher_ratio, 4),
                 'time_s': round(time.time() - t0, 2),
             }
             self.history.append(epoch_info)
 
             if verbose and (epoch % log_every == 0 or epoch == 1):
                 mark = '*' if improved else ' '
+                tf_str = f" tf={teacher_ratio:.3f}" if self._use_teacher_forcing else ""
                 print(f"  Epoch {epoch:4d}/{n_epochs} {mark} | train={train_mse:.6f} val={val_mse:.6f} "
-                      f"best={self.best_val_mse:.6f} | lr={epoch_info['lr']:.2e} | {epoch_info['time_s']:.1f}s")
+                      f"best={self.best_val_mse:.6f} | lr={epoch_info['lr']:.2e}{tf_str} | {epoch_info['time_s']:.1f}s")
 
             if self.patience_counter >= patience:
                 if verbose:
@@ -177,7 +211,7 @@ def detect_device():
     return 'cpu'
 
 
-def train_monkey(monkey, config, override_epochs=None):
+def train_monkey(monkey: str, config: dict, override_epochs: int = None):
     print(f"\n{'='*65}")
     print(f"  AMAG Replication — {monkey.upper()}")
     print(f"  Target MSE: {config['experiment'][f'paper_mse_{monkey}']}")
@@ -187,10 +221,24 @@ def train_monkey(monkey, config, override_epochs=None):
     model_cfg = config['model']
     train_cfg = config['training'].copy()
 
-    train_loader, val_loader, stats = get_dataloaders(
-        monkey, batch_size=data_cfg['batch_size'],
-        val_fraction=data_cfg['val_fraction'], seed=data_cfg['seed'],
-    )
+    temporal_module = model_cfg.get('temporal_module', 'gru')
+    readout_mode = model_cfg.get('readout_mode', 'direct')
+    context_steps = data_cfg.get('context_steps', 10)
+
+    print(f"  Variant: temporal_module={temporal_module}, readout_mode={readout_mode}")
+
+    # Choose dataloader based on model type
+    if temporal_module == 'transformer':
+        train_loader, val_loader, stats = get_dataloaders_fullseq(
+            monkey, context_steps=context_steps,
+            batch_size=data_cfg['batch_size'],
+            val_fraction=data_cfg['val_fraction'], seed=data_cfg['seed'],
+        )
+    else:
+        train_loader, val_loader, stats = get_dataloaders(
+            monkey, batch_size=data_cfg['batch_size'],
+            val_fraction=data_cfg['val_fraction'], seed=data_cfg['seed'],
+        )
     print(f"  Train: {len(train_loader.dataset)} | Val: {len(val_loader.dataset)}")
 
     model = build_model(monkey, model_cfg)

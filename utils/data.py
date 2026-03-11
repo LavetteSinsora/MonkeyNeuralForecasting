@@ -155,6 +155,97 @@ def get_raw_test_data(monkey: str) -> np.ndarray:
     return np.concatenate(arrays, axis=0)
 
 
+def get_dataloaders_fullseq(
+    monkey: str,
+    context_steps: int = 10,
+    batch_size: int = 32,
+    val_fraction: float = 0.15,
+    seed: int = 42,
+    mask_value: float = 0.0,
+    num_workers: int = 0,
+) -> Tuple[DataLoader, DataLoader, Dict]:
+    """Full-sequence data loading for Transformer AMAG-T variant.
+
+    Provides all 20 timesteps as model input, with future positions masked to
+    a constant value. Targets are the true LMP values at the prediction window.
+
+    Args:
+        monkey: 'affi' or 'beignet'
+        context_steps: number of real context timesteps (remaining are masked)
+        batch_size: dataloader batch size
+        val_fraction: fraction of training data held out for validation
+        seed: random seed for train/val split
+        mask_value: value to fill masked future positions (default 0.0 = normalized mean)
+        num_workers: dataloader workers
+
+    Returns:
+        train_loader: X=(B, 20, C, 9) masked, Y=(B, T_pred, C) future LMP
+        val_loader:   same format
+        stats:        normalization statistics (from training context window)
+    """
+    assert monkey in MONKEY_FILES, f"Unknown monkey: {monkey}. Choose from {list(MONKEY_FILES)}"
+    train_path = os.path.join(DATASET_DIR, MONKEY_FILES[monkey]['train'])
+    raw = load_npz(train_path)
+
+    # Compute stats from context window only (no leakage)
+    stats = compute_normalization_stats(raw)
+    data_norm = normalize(raw, stats)
+
+    # Mask future positions to constant after normalization
+    data_masked = data_norm.copy()
+    data_masked[:, context_steps:, :, :] = mask_value
+
+    # Train/val split
+    rng = np.random.default_rng(seed)
+    n = len(data_masked)
+    indices = rng.permutation(n)
+    n_val = max(1, int(n * val_fraction))
+    val_idx = indices[:n_val]
+    train_idx = indices[n_val:]
+
+    # X: full masked 20-step sequence, Y: true LMP at future positions
+    pred_steps = PRED_STEPS
+    X_train = data_masked[train_idx]                                # (N, 20, C, 9)
+    Y_train = data_norm[train_idx, context_steps:context_steps + pred_steps, :, 0]  # (N, T_pred, C)
+    X_val = data_masked[val_idx]
+    Y_val = data_norm[val_idx, context_steps:context_steps + pred_steps, :, 0]
+
+    train_ds = MonkeyDataset(X_train, Y_train)
+    val_ds = MonkeyDataset(X_val, Y_val)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+                              num_workers=num_workers, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
+                            num_workers=num_workers, pin_memory=True)
+    return train_loader, val_loader, stats
+
+
+def get_test_loader_fullseq(
+    monkey: str,
+    stats: Dict,
+    context_steps: int = 10,
+    batch_size: int = 64,
+    mask_value: float = 0.0,
+    num_workers: int = 0,
+) -> DataLoader:
+    """Load and normalize test data for Transformer AMAG-T variant (full-sequence format)."""
+    test_files = MONKEY_FILES[monkey]['test']
+    arrays = []
+    for fname in test_files:
+        path = os.path.join(DATASET_DIR, fname)
+        arrays.append(load_npz(path))
+    raw = np.concatenate(arrays, axis=0)
+    data_norm = normalize(raw, stats)
+
+    data_masked = data_norm.copy()
+    data_masked[:, context_steps:, :, :] = mask_value
+
+    pred_steps = PRED_STEPS
+    X = data_masked                                                              # (N, 20, C, 9)
+    Y = data_norm[:, context_steps:context_steps + pred_steps, :, 0]            # (N, T_pred, C)
+    ds = MonkeyDataset(X, Y)
+    return DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+
 def prepare_submission_array(
     context_lmp: np.ndarray,
     predictions: np.ndarray,
