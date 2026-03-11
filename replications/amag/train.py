@@ -211,7 +211,7 @@ def detect_device():
     return 'cpu'
 
 
-def train_monkey(monkey: str, config: dict, override_epochs: int = None):
+def train_monkey(monkey: str, config: dict, override_epochs: int = None, override_patience: int = None):
     print(f"\n{'='*65}")
     print(f"  AMAG Replication — {monkey.upper()}")
     print(f"  Target MSE: {config['experiment'][f'paper_mse_{monkey}']}")
@@ -253,6 +253,8 @@ def train_monkey(monkey: str, config: dict, override_epochs: int = None):
     if override_epochs is not None:
         train_cfg['n_epochs'] = override_epochs
         train_cfg['patience'] = override_epochs + 1
+    if override_patience is not None:
+        train_cfg['patience'] = override_patience
 
     if train_cfg.get('device', 'auto') == 'auto':
         train_cfg['device'] = detect_device()
@@ -287,6 +289,7 @@ def main():
     parser.add_argument('--config', default=os.path.join(_here, 'config.yaml'))
     parser.add_argument('--monkey', choices=['affi', 'beignet', 'both'], default='both')
     parser.add_argument('--epochs', type=int, default=None)
+    parser.add_argument('--patience', type=int, default=None)
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -295,7 +298,7 @@ def main():
     monkeys = ['affi', 'beignet'] if args.monkey == 'both' else [args.monkey]
     all_results = []
     for monkey in monkeys:
-        result = train_monkey(monkey, config, override_epochs=args.epochs)
+        result = train_monkey(monkey, config, override_epochs=args.epochs, override_patience=args.patience)
         all_results.append(result)
 
     print(f"\n{'='*65}")
