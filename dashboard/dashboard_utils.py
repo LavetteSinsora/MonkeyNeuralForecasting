@@ -69,6 +69,35 @@ def _detect_monkey_from_path(rel_path: str) -> Optional[str]:
     return None
 
 
+def _sniff_model_cfg(state_dict: dict, config: dict) -> dict:
+    """Infer model config from checkpoint state dict to handle architecture mismatches."""
+    hidden_size = config.get('hidden_size', 64)
+
+    # Detect hidden_size from GRU weight shape if not in config
+    if 'te.gru.weight_ih_l0' in state_dict:
+        hidden_size = state_dict['te.gru.weight_ih_l0'].shape[0] // 3
+
+    # Detect use_adaptor: present only if adaptor_mlp keys exist
+    use_adaptor = any('adaptor_mlp' in k for k in state_dict)
+
+    # Detect adaptor_depth from number of Linear layers in adaptor_mlp
+    adaptor_depth = 4  # default
+    if use_adaptor:
+        n_linear = sum(1 for k in state_dict if 'adaptor_mlp' in k and k.endswith('.weight'))
+        adaptor_depth = n_linear * 2  # 1 linear → depth=2, 2 linears → depth=4
+
+    # Detect use_mul: fc_mod present only when use_mul=True
+    use_mul = any('fc_mod' in k for k in state_dict)
+
+    return {
+        'hidden_size': hidden_size,
+        'use_adaptor': use_adaptor,
+        'use_mul': use_mul,
+        'adaptor_depth': adaptor_depth,
+        'compute_init_corr': True,
+    }
+
+
 def load_checkpoint(path: str, monkey: str, device: str = 'cpu') -> Tuple[torch.nn.Module, Dict]:
     """
     Load a checkpoint and reconstruct the AMAG model.
@@ -76,19 +105,13 @@ def load_checkpoint(path: str, monkey: str, device: str = 'cpu') -> Tuple[torch.
     """
     checkpoint = torch.load(path, weights_only=False, map_location=device)
 
-    # Reconstruct model
-    # Try the replications module first (newer), then replication (older)
     try:
         from replications.amag.model import build_model
     except ImportError:
         from replication.amag.model import build_model
 
     config = checkpoint.get('config', {})
-    model_cfg = {
-        'hidden_size': config.get('hidden_size', 64),
-        'use_adaptor': True,
-        'compute_init_corr': True,
-    }
+    model_cfg = _sniff_model_cfg(checkpoint['model_state_dict'], config)
     model = build_model(monkey, model_cfg)
     model.load_state_dict(checkpoint['model_state_dict'])
     model = model.to(device)
