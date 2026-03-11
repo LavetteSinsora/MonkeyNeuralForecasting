@@ -1,0 +1,95 @@
+# AMAG Replication Configuration
+# Reference: NeurIPS 2023
+
+experiment:
+  name: amag_replication
+  description: "Faithful AMAG replication with paper hyperparameters"
+  paper_mse_affi: 0.0144
+  paper_mse_beignet: 0.0192
+  paper_r2_affi: 0.763
+  paper_r2_beignet: 0.665
+
+data:
+  context_steps: 10
+  pred_steps: 10
+  val_fraction: 0.15
+  seed: 42
+  batch_size: 32
+
+model:
+  hidden_size: 64
+  use_adaptor: true
+  compute_init_corr: true
+
+training:
+  lr: 5.0e-4
+  weight_decay: 1.0e-5
+  n_epochs: 1000
+  lr_decay: 0.95
+  lr_decay_every: 50
+  patience: 150
+  seed: 42
+  log_every: 10
+  device: auto
+
+ablations:
+  - name: full_amag
+    description: "Full AMAG (baseline)"
+    use_add: true
+    use_mul: true
+    use_adaptor: true
+    learnable_adj: true
+    init_type: correlation
+
+  - name: no_add
+    description: "Remove additive module"
+    use_add: false
+    use_mul: true
+    use_adaptor: false
+    learnable_adj: true
+    init_type: correlation
+
+  - name: no_mul
+    description: "Remove multiplicative module"
+    use_add: true
+    use_mul: false
+    use_adaptor: false
+    learnable_adj: true
+    init_type: correlation
+
+  - name: no_spatial
+    description: "Remove both modules (GRU-only)"
+    use_add: false
+    use_mul: false
+    use_adaptor: false
+    learnable_adj: false
+    init_type: correlation
+
+  - name: fixed_adj
+    description: "Fixed adjacency (no learning)"
+    use_add: true
+    use_mul: true
+    use_adaptor: false
+    learnable_adj: false
+    init_type: correlation
+
+  - name: random_init
+    description: "Random adjacency initialization"
+    use_add: true
+    use_mul: true
+    use_adaptor: false
+    learnable_adj: true
+    init_type: random
+
+ablation_training:
+  lr: 5.0e-4
+  weight_decay: 1.0e-5
+  n_epochs: 500
+  lr_decay: 0.95
+  lr_decay_every: 50
+  patience: 100
+  seed: 42
+  log_every: 50
+  batch_size: 32
+  val_fraction: 0.15
+  device: auto

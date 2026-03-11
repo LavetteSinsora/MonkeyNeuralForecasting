@@ -1,0 +1,39 @@
+# Study 001: AMAG Architecture Improvements
+# Shared training configuration for all experiments in this study
+#
+# Code: notebooks/colab_amag_experiments.ipynb
+
+# --- Model ---
+model:
+  hidden_size: 64       # GRU hidden / embedding dimension (matches AMAG paper)
+  n_features: 9         # Input features: LMP + 8 power bands
+  n_pred_steps: 10      # Prediction horizon (10 timesteps × 30ms = 300ms)
+  compute_init_corr: true  # Initialize adjacency from LMP correlation matrix
+
+# --- Training ---
+training:
+  lr: 5.0e-4
+  weight_decay: 1.0e-5
+  n_epochs: 500
+  patience: 100         # Early stopping epochs without improvement
+  batch_size: 32        # Reduced to 16 on OOM for large experiments
+  grad_clip: 1.0        # Max gradient norm
+  seed: 42
+
+# --- LR Schedule ---
+lr_schedule:
+  type: step
+  gamma: 0.95           # Decay factor
+  step_size: 50         # Epochs between decay steps
+
+# --- Data ---
+data:
+  val_fraction: 0.15    # 15% of training data for validation
+  context_steps: 10     # Input timesteps (t=0..9)
+  pred_steps: 10        # Target timesteps (t=10..19)
+  clip_value: 4.0       # Z-score clipping threshold for normalization
+
+# --- Experiment-specific overrides ---
+# Exp 003 only:
+exp_003:
+  aux_loss_weight: 0.1  # Weight for auxiliary next-step prediction loss

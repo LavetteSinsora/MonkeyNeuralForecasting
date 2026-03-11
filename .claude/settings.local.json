@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp replication/amag/checkpoints/affi/best.pth replications/amag/checkpoints/affi/best.pth)",
+      "Bash(cp replication/amag/checkpoints/beignet/best.pth replications/amag/checkpoints/beignet/best.pth)",
+      "Bash(cp replication/amag/results/*.json replications/amag/results/)",
+      "Bash(cp replication/amag/results/*.png replications/amag/results/)",
+      "Bash(python -c \"from utils.data import get_dataloaders, MONKEY_CHANNELS, DATASET_DIR; print\\(f''DATASET_DIR: {DATASET_DIR}''\\); print\\(f''Channels: {MONKEY_CHANNELS}''\\); print\\(''utils.data OK''\\)\")",
+      "Bash(python -c \"from utils.metrics import mse, evaluate_model, compute_all_metrics; print\\(''utils.metrics OK''\\)\")",
+      "Bash(python3 -c \"import pypdf; print\\(''available''\\)\")",
+      "Bash(python3 -c \"import pikepdf; print\\(''available''\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(python replications/amag/train.py --help)",
+      "Bash(streamlit run:*)",
+      "Bash(python -m py_compile dashboard/app.py)",
+      "Bash(python -m py_compile dashboard/dashboard_utils.py)",
+      "Bash(python -m py_compile dashboard/pages/1_Training.py)",
+      "Bash(python -m py_compile dashboard/pages/2_Results.py)",
+      "Bash(python -m py_compile dashboard/pages/3_Diagnosis.py)",
+      "Bash(gh repo:*)"
+    ]
+  }
+}
